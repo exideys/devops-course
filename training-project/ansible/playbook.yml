@@ -1,0 +1,109 @@
+---
+- name: Налаштування сервера для training-project
+  hosts: devservers
+  become: yes
+
+  vars:
+    app_user: training
+    app_home: /home/training
+    app_dir: /opt/training-app
+    project_subdir: /opt/training-app/training-project
+    app_repo: "https://github.com/exideys/devops-course.git"
+
+  tasks:
+    - name: Створити користувача для додатку
+      user:
+        name: "{{ app_user }}"
+        shell: /bin/bash
+        create_home: yes
+        home: "{{ app_home }}"
+        groups: []
+        state: present
+
+    - name: Встановити необхідні пакети
+      apt:
+        name:
+          - acl
+          - git
+          - python3
+          - python3-pip
+          - python3-venv
+        state: present
+        update_cache: yes
+
+    - name: Створити директорію .ssh для користувача
+      file:
+        path: "{{ app_home }}/.ssh"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0700"
+
+    - name: Створити директорію додатку
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0755"
+
+    - name: Створити директорію для конфігурації
+      file:
+        path: "{{ app_home }}/.config"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0700"
+
+    - name: Клонувати репозиторій training-project
+      git:
+        repo: "{{ app_repo }}"
+        dest: "{{ app_dir }}"
+        version: main
+      become_user: "{{ app_user }}"
+
+    - name: Створити файл .env
+      copy:
+        content: "PORT=5000\n"
+        dest: "{{ project_subdir }}/.env"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0600"
+
+    - name: Встановити Python-залежності додатку
+      pip:
+        requirements: "{{ project_subdir }}/requirements.txt"
+        virtualenv: "{{ project_subdir }}/venv"
+        virtualenv_command: /usr/bin/python3 -m venv
+      become_user: "{{ app_user }}"
+
+    - name: Скопіювати unit-файл сервісу
+      copy:
+        src: training-app.service
+        dest: /etc/systemd/system/training-app.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify:
+        - Reload systemd
+        - Restart training-app
+
+    - name: Активувати автозапуск сервісу
+      systemd:
+        name: training-app
+        enabled: yes
+
+    - name: Запустити сервіс
+      systemd:
+        name: training-app
+        state: started
+
+  handlers:
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: Restart training-app
+      systemd:
+        name: training-app
+        state: restarted
