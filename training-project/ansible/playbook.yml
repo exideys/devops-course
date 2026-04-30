@@ -31,6 +31,26 @@
         state: present
         update_cache: yes
 
+    - name: Встановити Docker
+      apt:
+        name:
+          - docker.io
+          - docker-compose-v2
+        state: present
+        update_cache: yes
+
+    - name: Увімкнути та запустити Docker
+      systemd:
+        name: docker
+        enabled: yes
+        state: started
+
+    - name: Додати користувача training до групи docker
+      user:
+        name: "{{ app_user }}"
+        groups: docker
+        append: yes
+
     - name: Створити директорію .ssh для користувача
       file:
         path: "{{ app_home }}/.ssh"
@@ -64,11 +84,15 @@
 
     - name: Створити файл .env
       copy:
-        content: "PORT=5000\n"
+        content: |
+          PORT=5000
+          POSTGRES_PASSWORD={{ db_password }}
         dest: "{{ project_subdir }}/.env"
         owner: "{{ app_user }}"
         group: "{{ app_user }}"
         mode: "0600"
+      notify:
+        - Restart training-app
 
     - name: Встановити Python-залежності додатку
       pip:
@@ -76,6 +100,14 @@
         virtualenv: "{{ project_subdir }}/venv"
         virtualenv_command: /usr/bin/python3 -m venv
       become_user: "{{ app_user }}"
+
+    - name: Скопіювати docker-compose.yml
+      copy:
+        src: ../docker-compose.yml
+        dest: "{{ project_subdir }}/docker-compose.yml"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0644"
 
     - name: Скопіювати unit-файл сервісу
       copy:
@@ -97,6 +129,11 @@
       systemd:
         name: training-app
         state: started
+
+    - name: Запустити PostgreSQL контейнер
+      command: docker compose up -d
+      args:
+        chdir: "{{ project_subdir }}"
 
   handlers:
     - name: Reload systemd
